@@ -1,0 +1,4 @@
+import 'dotenv/config';
+import { defineConfig, devices } from '@playwright/test';
+if (!process.env.TEST_DATABASE_URL || !new URL(process.env.TEST_DATABASE_URL).pathname.endsWith('_test')) throw new Error('Set TEST_DATABASE_URL to isolated *_test database');
+export default defineConfig({ testDir:'tests/e2e',fullyParallel:false,workers:1,retries:0,use:{baseURL:'http://localhost:3001',trace:'off',launchOptions:process.env.PLAYWRIGHT_EXECUTABLE_PATH ? { executablePath:process.env.PLAYWRIGHT_EXECUTABLE_PATH } : {}},projects:[{name:'chromium',use:{...devices['Desktop Chrome']}}],webServer:{command:'npm run start',url:'http://localhost:3001/ready',reuseExistingServer:false,env:{NODE_ENV:'test',PORT:'3001',APP_BASE_URL:'http://localhost:3001',DATABASE_URL:process.env.TEST_DATABASE_URL},timeout:30000} });
