@@ -1,0 +1,393 @@
+generator client {
+  provider   = "prisma-client-js"
+  engineType = "client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  CONTENT_MANAGER
+  APPROVER
+  VIEWER
+}
+
+enum SocialPlatform {
+  telegram
+  max
+  vk
+  ok
+}
+
+enum PostStatus {
+  idea
+  draft
+  review
+  changes_requested
+  approved
+  scheduled
+  publishing
+  published
+  partially_published
+  failed
+  cancelled
+}
+
+enum PlatformStatus {
+  pending
+  queued
+  publishing
+  published
+  retrying
+  failed
+  cancelled
+}
+
+enum ConnectionStatus {
+  not_connected
+  connected
+  error
+  disabled
+}
+
+enum ApprovalDecision {
+  approved
+  changes_requested
+}
+
+enum ContentEntityType {
+  lecture
+  collection
+  campaign_page
+  news
+  other
+}
+
+model User {
+  id           String        @id @default(uuid()) @db.Uuid
+  email        String        @unique
+  name         String
+  passwordHash String
+  role         Role          @default(VIEWER)
+  isActive     Boolean       @default(true)
+  createdAt    DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime      @updatedAt @db.Timestamptz(3)
+  sessions     Session[]
+  posts        Post[]
+  assets       Asset[]
+  approvals    Approval[]
+  comments     PostComment[]
+  auditLogs    AuditLog[]
+}
+
+model Session {
+  id        String   @id @default(uuid()) @db.Uuid
+  tokenHash String   @unique
+  csrfToken String
+  userId    String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Post {
+  id                 String             @id @default(uuid()) @db.Uuid
+  internalTitle      String
+  baseText           String             @default("")
+  ctaUrl             String?
+  scheduledAt        DateTime?          @db.Timestamptz(3)
+  timezone           String             @default("Europe/Moscow")
+  status             PostStatus         @default(draft)
+  version            Int                @default(1)
+  publicationVersion Int                @default(1)
+  authorId           String             @db.Uuid
+  author             User               @relation(fields: [authorId], references: [id], onDelete: Restrict)
+  rubricId           String?            @db.Uuid
+  rubric             Rubric?            @relation(fields: [rubricId], references: [id], onDelete: Restrict)
+  campaignId         String?            @db.Uuid
+  campaign           Campaign?          @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  contentEntityType  ContentEntityType?
+  contentEntityId    String?
+  contentEntityUrl   String?
+  utmEnabled         Boolean            @default(true)
+  utmContent         String?
+  createdAt          DateTime           @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime           @updatedAt @db.Timestamptz(3)
+  platforms          PostPlatform[]
+  variants           PostVariant[]
+  tags               PostTag[]
+  assets             PostAsset[]
+  approvals          Approval[]
+  comments           PostComment[]
+  jobs               PublicationJob[]
+  platformPosts      PlatformPost[]
+
+  @@index([scheduledAt])
+  @@index([status])
+  @@index([authorId])
+  @@index([campaignId])
+  @@index([rubricId])
+}
+
+model PostPlatform {
+  id        String         @id @default(uuid()) @db.Uuid
+  postId    String         @db.Uuid
+  post      Post           @relation(fields: [postId], references: [id], onDelete: Cascade)
+  platform  SocialPlatform
+  status    PlatformStatus @default(pending)
+  channelId String?        @db.Uuid
+  channel   SocialChannel? @relation(fields: [channelId], references: [id], onDelete: Restrict)
+
+  @@unique([postId, platform])
+  @@index([channelId])
+}
+
+model PostVariant {
+  id                       String         @id @default(uuid()) @db.Uuid
+  postId                   String         @db.Uuid
+  post                     Post           @relation(fields: [postId], references: [id], onDelete: Cascade)
+  platform                 SocialPlatform
+  inheritBaseText          Boolean        @default(true)
+  text                     String         @default("")
+  platformSpecificSettings Json           @default("{}")
+
+  @@unique([postId, platform])
+}
+
+model Rubric {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique
+  posts     Post[]
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+}
+
+model Campaign {
+  id          String    @id @default(uuid()) @db.Uuid
+  name        String
+  slug        String    @unique
+  dateFrom    DateTime? @db.Timestamptz(3)
+  dateTo      DateTime? @db.Timestamptz(3)
+  utmCampaign String
+  description String    @default("")
+  posts       Post[]
+  assets      Asset[]
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+}
+
+model Tag {
+  id     String     @id @default(uuid()) @db.Uuid
+  name   String     @unique
+  posts  PostTag[]
+  assets AssetTag[]
+}
+
+model PostTag {
+  postId String @db.Uuid
+  tagId  String @db.Uuid
+  post   Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  tag    Tag    @relation(fields: [tagId], references: [id], onDelete: Restrict)
+
+  @@id([postId, tagId])
+  @@index([tagId])
+}
+
+model Asset {
+  id               String      @id @default(uuid()) @db.Uuid
+  filename         String      @unique
+  originalName     String
+  mimeType         String
+  size             BigInt
+  storagePath      String      @unique
+  title            String      @default("")
+  description      String      @default("")
+  source           String?
+  rightsComment    String?
+  rightsValidUntil DateTime?   @db.Timestamptz(3)
+  uploadedById     String      @db.Uuid
+  uploadedBy       User        @relation(fields: [uploadedById], references: [id], onDelete: Restrict)
+  campaignId       String?     @db.Uuid
+  campaign         Campaign?   @relation(fields: [campaignId], references: [id], onDelete: Restrict)
+  tags             AssetTag[]
+  posts            PostAsset[]
+  createdAt        DateTime    @default(now()) @db.Timestamptz(3)
+
+  @@index([campaignId])
+  @@index([uploadedById])
+}
+
+model AssetTag {
+  assetId String @db.Uuid
+  tagId   String @db.Uuid
+  asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  tag     Tag    @relation(fields: [tagId], references: [id], onDelete: Restrict)
+
+  @@id([assetId, tagId])
+  @@index([tagId])
+}
+
+model PostAsset {
+  postId  String @db.Uuid
+  assetId String @db.Uuid
+  order   Int    @default(0)
+  post    Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  asset   Asset  @relation(fields: [assetId], references: [id], onDelete: Restrict)
+
+  @@id([postId, assetId])
+  @@index([assetId])
+}
+
+model Approval {
+  id          String           @id @default(uuid()) @db.Uuid
+  postId      String           @db.Uuid
+  post        Post             @relation(fields: [postId], references: [id], onDelete: Restrict)
+  approverId  String           @db.Uuid
+  approver    User             @relation(fields: [approverId], references: [id], onDelete: Restrict)
+  decision    ApprovalDecision
+  postVersion Int
+  comment     String?
+  createdAt   DateTime         @default(now()) @db.Timestamptz(3)
+
+  @@index([postId, createdAt])
+}
+
+model PostComment {
+  id        String   @id @default(uuid()) @db.Uuid
+  postId    String   @db.Uuid
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Restrict)
+  userId    String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  text      String
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([postId, createdAt])
+}
+
+model SocialChannel {
+  id                String            @id @default(uuid()) @db.Uuid
+  platform          SocialPlatform
+  displayName       String
+  externalChannelId String
+  isEnabled         Boolean           @default(false)
+  connectionStatus  ConnectionStatus  @default(not_connected)
+  lastVerifiedAt    DateTime?         @db.Timestamptz(3)
+  credential        SocialCredential?
+  postPlatforms     PostPlatform[]
+  jobs              PublicationJob[]
+  platformPosts     PlatformPost[]
+  createdAt         DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime          @updatedAt @db.Timestamptz(3)
+
+  @@unique([platform, externalChannelId])
+}
+
+model SocialCredential {
+  id         String        @id @default(uuid()) @db.Uuid
+  channelId  String        @unique @db.Uuid
+  channel    SocialChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  ciphertext String
+  iv         String
+  authTag    String
+  keyVersion Int           @default(1)
+  updatedAt  DateTime      @updatedAt @db.Timestamptz(3)
+}
+
+model PublicationJob {
+  id                 String               @id @default(uuid()) @db.Uuid
+  postId             String               @db.Uuid
+  post               Post                 @relation(fields: [postId], references: [id], onDelete: Restrict)
+  platform           SocialPlatform
+  channelId          String               @db.Uuid
+  channel            SocialChannel        @relation(fields: [channelId], references: [id], onDelete: Restrict)
+  publicationVersion Int
+  idempotencyKey     String               @unique
+  status             PlatformStatus       @default(queued)
+  scheduledAt        DateTime             @db.Timestamptz(3)
+  leaseUntil         DateTime?            @db.Timestamptz(3)
+  lockedBy           String?
+  attemptCount       Int                  @default(0)
+  lastErrorCode      String?
+  lastErrorMessage   String?
+  payloadSnapshot    Json
+  attempts           PublicationAttempt[]
+  platformPost       PlatformPost?
+  createdAt          DateTime             @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime             @updatedAt @db.Timestamptz(3)
+
+  @@unique([postId, platform, publicationVersion])
+  @@index([status, scheduledAt])
+  @@index([leaseUntil])
+  @@index([channelId])
+}
+
+model PublicationAttempt {
+  id           String         @id @default(uuid()) @db.Uuid
+  jobId        String         @db.Uuid
+  job          PublicationJob @relation(fields: [jobId], references: [id], onDelete: Restrict)
+  attempt      Int
+  startedAt    DateTime       @default(now()) @db.Timestamptz(3)
+  finishedAt   DateTime?      @db.Timestamptz(3)
+  errorCode    String?
+  errorMessage String?
+  rawResponse  Json?
+
+  @@unique([jobId, attempt])
+}
+
+model PlatformPost {
+  id                 String           @id @default(uuid()) @db.Uuid
+  postId             String           @db.Uuid
+  post               Post             @relation(fields: [postId], references: [id], onDelete: Restrict)
+  platform           SocialPlatform
+  publicationVersion Int
+  jobId              String           @unique @db.Uuid
+  job                PublicationJob   @relation(fields: [jobId], references: [id], onDelete: Restrict)
+  channelId          String           @db.Uuid
+  channel            SocialChannel    @relation(fields: [channelId], references: [id], onDelete: Restrict)
+  externalPostId     String
+  postUrl            String?
+  publishedAt        DateTime         @db.Timestamptz(3)
+  rawResponse        Json?
+  metrics            MetricSnapshot[]
+
+  @@unique([postId, platform, publicationVersion])
+  @@index([postId, platform])
+  @@index([channelId, externalPostId])
+}
+
+model MetricSnapshot {
+  id             String       @id @default(uuid()) @db.Uuid
+  platformPostId String       @db.Uuid
+  platformPost   PlatformPost @relation(fields: [platformPostId], references: [id], onDelete: Restrict)
+  snapshotAt     DateTime     @default(now()) @db.Timestamptz(3)
+  views          BigInt?
+  reach          BigInt?
+  reactions      BigInt?
+  likes          BigInt?
+  comments       BigInt?
+  shares         BigInt?
+  linkClicks     BigInt?
+  rawMetrics     Json?
+
+  @@index([platformPostId, snapshotAt])
+}
+
+model AuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  actorUserId String?  @db.Uuid
+  actor       User?    @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  action      String
+  entityType  String
+  entityId    String?
+  metadata    Json     @default("{}")
+  ip          String?
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([createdAt])
+  @@index([entityType, entityId])
+}
